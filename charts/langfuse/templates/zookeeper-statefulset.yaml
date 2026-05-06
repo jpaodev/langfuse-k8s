@@ -1,0 +1,161 @@
+{{- if and .Values.clickhouse.deploy .Values.clickhouse.zookeeper.enabled -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "langfuse.fullname" . }}-zookeeper
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "langfuse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zookeeper
+spec:
+  replicas: {{ .Values.clickhouse.zookeeper.replicaCount | default 3 }}
+  serviceName: {{ include "langfuse.fullname" . }}-zookeeper-headless
+  podManagementPolicy: {{ .Values.clickhouse.zookeeper.podManagementPolicy | default "OrderedReady" }}
+  selector:
+    matchLabels:
+      {{- include "langfuse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: zookeeper
+  template:
+    metadata:
+      labels:
+        {{- include "langfuse.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: zookeeper
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.clickhouse.zookeeper.terminationGracePeriodSeconds | default 30 }}
+      {{- if .Values.clickhouse.zookeeper.affinity }}
+      affinity:
+        {{- toYaml .Values.clickhouse.zookeeper.affinity | nindent 8 }}
+      {{- end }}
+      {{- if .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.global.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      securityContext:
+        fsGroup: 1001
+        {{- if and .Values.clickhouse.zookeeper.podSecurityContext (hasKey .Values.clickhouse.zookeeper.podSecurityContext "fsGroupChangePolicy") }}
+        fsGroupChangePolicy: {{ .Values.clickhouse.zookeeper.podSecurityContext.fsGroupChangePolicy }}
+        {{- else }}
+        fsGroupChangePolicy: "OnRootMismatch"
+        {{- end }}
+        runAsUser: 1001
+        runAsGroup: 1001
+        supplementalGroups: [1001]
+      initContainers:
+      - name: init-zookeeper-id
+        image: "{{ if .Values.clickhouse.zookeeper.image.registry }}{{ .Values.clickhouse.zookeeper.image.registry }}/{{ end }}{{ .Values.clickhouse.zookeeper.image.repository }}:{{ .Values.clickhouse.zookeeper.image.tag }}"
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        command:
+        - bash
+        - -c
+        - |
+          # Extract ordinal from hostname (e.g. langfuse-zookeeper-0 -> 0)
+          ORDINAL=${HOSTNAME##*-}
+          # Zookeeper ID must be 1-based (0 -> 1, 1 -> 2, etc.)
+          ID=$((ORDINAL + 1))
+          mkdir -p /bitnami/zookeeper/data
+          echo $ID > /bitnami/zookeeper/data/myid
+          echo "Initialized myid=$ID in /bitnami/zookeeper/data/myid"
+        volumeMounts:
+        - name: data
+          mountPath: /bitnami/zookeeper
+      containers:
+      - name: zookeeper
+        image: "{{ if .Values.clickhouse.zookeeper.image.registry }}{{ .Values.clickhouse.zookeeper.image.registry }}/{{ end }}{{ .Values.clickhouse.zookeeper.image.repository }}:{{ .Values.clickhouse.zookeeper.image.tag }}"
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          runAsGroup: 1001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - name: client
+          containerPort: 2181
+          protocol: TCP
+        - name: follower
+          containerPort: 2888
+          protocol: TCP
+        - name: election
+          containerPort: 3888
+          protocol: TCP
+        env:
+        - name: ZOO_DATA_DIR
+          value: /bitnami/zookeeper/data
+        - name: ZOO_DATA_LOG_DIR
+          value: /bitnami/zookeeper/data
+        - name: ZOO_CLIENT_PORT
+          value: "2181"
+        - name: ZOO_LOG_DIR
+          value: /opt/zookeeper/logs
+        - name: ZOO_CONF_DIR
+          value: /opt/zookeeper/conf
+        - name: ZOO_AUTOPURGE_PURGEINTERVAL
+          value: {{ .Values.clickhouse.zookeeper.autopurge.purgeInterval | quote }}
+        - name: ZOO_AUTOPURGE_INTERVAL
+          value: {{ .Values.clickhouse.zookeeper.autopurge.purgeInterval | quote }}
+        - name: ZOO_AUTOPURGE_RETAIN_COUNT
+          value: {{ .Values.clickhouse.zookeeper.autopurge.snapRetainCount | quote }}
+        - name: ZOO_AUTOPURGE_SNAPRETAINCOUNT
+          value: {{ .Values.clickhouse.zookeeper.autopurge.snapRetainCount | quote }}
+        # - name: ZOO_CFG_quorumListenOnAllIPs
+        #   value: "true"
+        - name: ZOO_SERVERS
+          value: {{ printf "server.1=%s-zookeeper-0.%s-zookeeper-headless:2888:3888;2181 server.2=%s-zookeeper-1.%s-zookeeper-headless:2888:3888;2181 server.3=%s-zookeeper-2.%s-zookeeper-headless:2888:3888;2181" (include "langfuse.fullname" .) (include "langfuse.fullname" .) (include "langfuse.fullname" .) (include "langfuse.fullname" .) (include "langfuse.fullname" .) (include "langfuse.fullname" .) | quote }}
+        {{- if .Values.clickhouse.zookeeper.resources }}
+        resources:
+          {{- toYaml .Values.clickhouse.zookeeper.resources | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        - name: data
+          mountPath: /bitnami/zookeeper
+        - name: tmp
+          mountPath: /tmp
+        - name: logs
+          mountPath: /opt/zookeeper/logs
+        - name: conf
+          mountPath: /opt/zookeeper/conf
+        livenessProbe:
+          tcpSocket:
+            port: client
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: client
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: logs
+        emptyDir: {}
+      - name: conf
+        emptyDir: {}
+      - name: non-bitnami-conf
+        emptyDir: {}
+      - name: non-bitnami-logs
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      {{- if .Values.clickhouse.zookeeper.persistence.storageClass }}
+      storageClassName: {{ .Values.clickhouse.zookeeper.persistence.storageClass | quote }}
+      {{- end }}
+      resources:
+        requests:
+          storage: {{ .Values.clickhouse.zookeeper.persistence.size | default "8Gi" }}
+{{- end }}

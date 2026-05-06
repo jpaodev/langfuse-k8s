@@ -73,6 +73,55 @@ Return PostgreSQL hostname
 {{- end }}
 
 {{/*
+Strip port from hostname if present (e.g., "host:6432" -> "host")
+Usage: {{ include "langfuse.stripPort" "hostname:port" }}
+*/}}
+{{- define "langfuse.stripPort" -}}
+{{- $host := . -}}
+{{- if contains ":" $host -}}
+{{- $host | splitList ":" | first -}}
+{{- else -}}
+{{- $host -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return PostgreSQL username
+*/}}
+{{- define "langfuse.postgresql.username" -}}
+{{- .Values.postgresql.auth.username | default "langfuse" }}
+{{- end }}
+
+{{/*
+Return PostgreSQL database name
+*/}}
+{{- define "langfuse.postgresql.database" -}}
+{{- .Values.postgresql.auth.database | default "langfuse" }}
+{{- end }}
+
+{{/*
+Return PostgreSQL secret name
+*/}}
+{{- define "langfuse.postgresql.secretName" -}}
+{{- if .Values.postgresql.auth.existingSecret }}
+{{- .Values.postgresql.auth.existingSecret }}
+{{- else }}
+{{- printf "%s-postgresql" (include "langfuse.fullname" .) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Return PostgreSQL user password key
+*/}}
+{{- define "langfuse.postgresql.userPasswordKey" -}}
+{{- if .Values.postgresql.auth.secretKeys.userPasswordKey }}
+{{- .Values.postgresql.auth.secretKeys.userPasswordKey }}
+{{- else }}
+{{- "password" }}
+{{- end }}
+{{- end }}
+
+{{/*
 Return Redis hostname
 */}}
 {{- define "langfuse.redis.hostname" -}}

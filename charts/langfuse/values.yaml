@@ -2,8 +2,13 @@
 
 global:
   security:
-    # -- Allow insecure images to use bitnami legacy repository. Can be set to false if secure images are being used (Paid).
+    # Allow insecure images for bitnami legacy repository
     allowInsecureImages: true
+  
+  # Global image pull secrets
+  imagePullSecrets: []
+
+  imageRegistry: ""
 
 # -- Override the name for the selector labels, defaults to the chart name
 nameOverride: ""
@@ -502,7 +507,10 @@ redis:
 
   image:
     # -- Overwrite default repository of helm chart to point to non-paid bitnami images.
-    repository: bitnamilegacy/valkey
+    registry: ""
+    repository: dhi.io/valkey
+    tag: "8.1.5-debian13"
+    pullPolicy: IfNotPresent
     # image: docker.io/bitnami/valkey:8.0.2-debian-12-r2
 
   # Redis TLS configuration
@@ -577,15 +585,11 @@ clickhouse:
   database: default
 
   image:
-    # -- Overwrite default repository of helm chart to point to non-paid bitnami images.
-    repository: bitnamilegacy/clickhouse
-    #  image: docker.io/bitnami/clickhouse:25.2.1-debian-12-r0
-
-  zookeeper:
-    image:
-      # -- Overwrite default repository of helm chart to point to non-paid bitnami images.
-      repository: bitnamilegacy/zookeeper
-      # image: docker.io/bitnami/zookeeper:3.9.3-debian-12-r8
+    # -- DHI ClickHouse server image (fixes hostname command error)
+    registry: ""
+    repository: dhi.io/clickhouse-server
+    tag: "25.12.2-debian13"
+    digest: "sha256:46e0b293081ac67faf364e0d9fdc88d21ff947c8552e4ed762da79052d39f4d9"
 
   # Authentication configuration
   auth:
@@ -613,9 +617,136 @@ clickhouse:
   # -- Subchart specific settings
   shards: 1 # Fixed - Langfuse does not support sharding
   # -- Number of replicas to use for the ClickHouse cluster. 1 corresponds to a single, non-HA deployment.
-  replicaCount: 3
-  # -- The resources preset to use for the ClickHouse cluster.
-  resourcesPreset: 2xlarge
+  replicaCount: 1
+  
+  # -- Custom resources configuration
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "4Gi"
+    limits:
+      cpu: "1500m"
+      memory: "8Gi"
+
+  # Security contexts
+  podSecurityContext: {}
+  securityContext: {}
+  # -- Alternative container security context key for compatibility with existing values overlays.
+  containerSecurityContext: {}
+  
+  # Persistence configuration
+  persistence:
+    # -- Size of the data volume for ClickHouse
+    size: "100Gi"
+    # -- Storage class for ClickHouse volumes
+    storageClass: ""
+
+  # =============================================================================
+  # GCS Storage Backend Configuration
+  # =============================================================================
+  # When enabled, ClickHouse stores data parts on GCS via S3 interoperability API
+  # instead of local PVC. A smaller cache PVC is used for hot data caching.
+  #
+  # Architecture:
+  #   ClickHouse Server → gcs_cache disk (local PVC cache) → gcs disk (GCS bucket)
+  #
+  # Benefits:
+  #   - Significant cost reduction (GCS ~$0.020/GB vs PVC ~$0.170/GB)
+  #   - 150Gi PVC × 3 replicas → ~30Gi cache PVC × 3 + GCS storage
+  #   - Data durability: GCS 99.999999999% vs PVC dependent on node
+  #   - Easier scaling: no PVC size planning needed
+  #
+  # CRITICAL: Do NOT configure GCS lifecycle policies on the bucket — this will
+  # break ClickHouse tables. See: https://clickhouse.com/docs/en/integrations/s3
+  # =============================================================================
+  gcsStorage:
+    # -- Enable GCS as ClickHouse storage backend (replaces large PVC with cache PVC + GCS)
+    enabled: false
+
+    # -- Size of the main PVC for ClickHouse metadata/system tables when using gcs_only policy
+    # Only used when policy is "gcs_only". For "hot_local_cold_gcs", persistence.size is used instead.
+    metadataSize: "10Gi"
+
+    # -- GCS bucket name for ClickHouse data
+    bucket: ""
+
+    # -- GCS endpoint (S3 interoperability API)
+    endpoint: "https://storage.googleapis.com"
+
+    # -- GCS region (should match bucket location)
+    region: "europe-west3"
+
+    # -- Use path-style URL (false for GCS virtual-hosted style)
+    usePathStyle: false
+
+    # -- HMAC access key ID for GCS S3 interoperability
+    accessKeyId:
+      secretKeyRef:
+        name: ""
+        key: ""
+    # -- HMAC secret access key for GCS S3 interoperability
+    secretAccessKey:
+      secretKeyRef:
+        name: ""
+        key: ""
+
+    # -- Prefix path within the GCS bucket for ClickHouse data
+    # Allows using a shared bucket with other services
+    pathPrefix: "clickhouse/data/"
+
+    # -- Send metadata headers with GCS requests (recommended for GCS)
+    sendMetadata: true
+
+    # -- Cache configuration (local PVC for hot data)
+    cache:
+      # -- Size of the local cache PVC
+      # Recommended: 30-50Gi for production (holds frequently accessed data parts)
+      size: "30Gi"
+      # -- Storage class for cache PVC (use local SSD for best performance)
+      storageClass: ""
+      # -- Maximum cache size on disk (must fit within cache PVC)
+      # ClickHouse will evict least-recently-used data when cache exceeds this
+      maxSize: "25Gi"
+      # -- Cache data on write operations (improves read-after-write performance)
+      cacheOnWriteOperations: true
+
+    # -- Storage policy mode
+    # "gcs_only" — All data on GCS with local cache (recommended, maximum cost savings)
+    # "hot_local_cold_gcs" — Recent data on local default disk, old data moved to GCS
+    #   Requires a larger local PVC for the hot volume (set via persistence.size)
+    policy: "gcs_only"
+
+    # -- Hot-local + cold-GCS specific settings (only used when policy is "hot_local_cold_gcs")
+    # Maximum size of a data part before it's moved to GCS (default: 10Gi)
+    hotMaxDataPartSizeBytes: 10737418240
+    # -- Move factor: fraction of free space on hot disk before moving to cold (default: 0.2 = 20%)
+    moveFactor: 0.2
+  
+  # ZooKeeper configuration (for cluster coordination)
+  zookeeper:
+    # -- Enable ZooKeeper deployment
+    enabled: true
+    # -- Number of ZooKeeper replicas
+    replicaCount: 3
+    image:
+      # -- DHI ZooKeeper image
+      registry: ""
+      repository: dhi.io/zookeeper
+      tag: "3.9.4-jre23-debian13"
+    # -- Resources for ZooKeeper
+    resources: {}
+    persistence:
+      # -- Size of the data volume for ZooKeeper
+      size: "8Gi"
+      # -- Storage class for ZooKeeper volumes
+      storageClass: ""
+    
+    # Auto-purge configuration
+    autopurge:
+      # -- Interval in hours for auto-purge of old snapshots and logs
+      purgeInterval: 1
+      # -- Number of snapshots to retain
+      snapRetainCount: 10
 
 # S3/MinIO Configuration
 s3:

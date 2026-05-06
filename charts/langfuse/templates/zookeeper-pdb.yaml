@@ -1,0 +1,21 @@
+{{- if and .Values.clickhouse.deploy .Values.clickhouse.zookeeper.enabled (and .Values.clickhouse.zookeeper.podDisruptionBudget (hasKey .Values.clickhouse.zookeeper.podDisruptionBudget "enabled") .Values.clickhouse.zookeeper.podDisruptionBudget.enabled) -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "langfuse.fullname" . }}-zookeeper
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "langfuse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zookeeper
+spec:
+  {{- if .Values.clickhouse.zookeeper.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.clickhouse.zookeeper.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if .Values.clickhouse.zookeeper.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.clickhouse.zookeeper.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "langfuse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: zookeeper
+{{- end }}

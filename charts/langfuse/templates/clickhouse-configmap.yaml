@@ -1,0 +1,154 @@
+{{- if .Values.clickhouse.deploy -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "langfuse.fullname" . }}-clickhouse-config
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "langfuse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+data:
+  01-listen.xml: |
+    <clickhouse>
+      <listen_host>::</listen_host>
+      <listen_host>0.0.0.0</listen_host>
+      <listen_try>1</listen_try>
+    </clickhouse>
+  02-logger.xml: |
+    <clickhouse>
+      <logger>
+        <level>information</level>
+        <console>true</console>
+      </logger>
+    </clickhouse>
+  03-macros.xml: |
+    <clickhouse>
+      <macros>
+        <shard>01</shard>
+        <replica from_env="REPLICA_ID"></replica>
+        <layer>{{ include "langfuse.fullname" . }}</layer>
+      </macros>
+    </clickhouse>
+  04-users.xml: |
+    <clickhouse>
+      <users>
+        <{{ .Values.clickhouse.auth.username }}>
+          <password>{{ .Values.clickhouse.auth.password }}</password>
+          <networks>
+            <ip>::/0</ip>
+          </networks>
+          <profile>default</profile>
+          <quota>default</quota>
+        </{{ .Values.clickhouse.auth.username }}>
+      </users>
+    </clickhouse>
+  05-sampling.xml: |
+    <clickhouse>
+      <asynchronous_insert_log remove="1"/>
+      <asynchronous_metric_log remove="1"/>
+      <error_log remove="1"/>
+      <event_log remove="1"/>
+      <latency_log remove="1"/>
+      <metric_log remove="1"/>
+      <query_log remove="1"/>
+      <query_metric_log remove="1"/>
+      <query_thread_log remove="1"/>
+      <query_views_log remove="1"/>
+      <part_log remove="1"/>
+      <text_log remove="1"/>
+      <trace_log remove="1"/>
+      <opentelemetry_span_log remove="1"/>
+      <processors_profile_log remove="1"/>
+    </clickhouse>
+  {{- if .Values.clickhouse.zookeeper.enabled }}
+  06-zookeeper.xml: |
+    <clickhouse>
+      <zookeeper>
+        <node>
+          <host>{{ include "langfuse.fullname" . }}-zookeeper-0.{{ include "langfuse.fullname" . }}-zookeeper-headless.{{ .Release.Namespace }}.svc.cluster.local</host>
+          <port>2181</port>
+        </node>
+        <node>
+          <host>{{ include "langfuse.fullname" . }}-zookeeper-1.{{ include "langfuse.fullname" . }}-zookeeper-headless.{{ .Release.Namespace }}.svc.cluster.local</host>
+          <port>2181</port>
+        </node>
+        <node>
+          <host>{{ include "langfuse.fullname" . }}-zookeeper-2.{{ include "langfuse.fullname" . }}-zookeeper-headless.{{ .Release.Namespace }}.svc.cluster.local</host>
+          <port>2181</port>
+        </node>
+      </zookeeper>
+    </clickhouse>
+  {{- end }}
+  {{- if .Values.clickhouse.clusterEnabled }}
+  07-cluster.xml: |
+    <clickhouse>
+      <remote_servers>
+        <default>
+          <shard>
+            <internal_replication>true</internal_replication>
+            {{- range $i := until (int .Values.clickhouse.replicaCount) }}
+            <replica>
+              <host>{{ include "langfuse.fullname" $ }}-clickhouse-shard0-{{ $i }}.{{ include "langfuse.fullname" $ }}-clickhouse-headless.{{ $.Release.Namespace }}.svc.cluster.local</host>
+              <port>9000</port>
+            </replica>
+            {{- end }}
+          </shard>
+        </default>
+      </remote_servers>
+    </clickhouse>
+  {{- end }}
+  {{- if .Values.clickhouse.gcsStorage.enabled }}
+  08-gcs-storage.xml: |
+    <clickhouse>
+      <storage_configuration>
+        <disks>
+          <gcs>
+            <type>s3</type>
+            <endpoint>{{ .Values.clickhouse.gcsStorage.endpoint }}/{{ .Values.clickhouse.gcsStorage.bucket }}/{{ .Values.clickhouse.gcsStorage.pathPrefix }}</endpoint>
+            <access_key_id from_env="CLICKHOUSE_GCS_ACCESS_KEY_ID"></access_key_id>
+            <secret_access_key from_env="CLICKHOUSE_GCS_SECRET_ACCESS_KEY"></secret_access_key>
+            <region>{{ .Values.clickhouse.gcsStorage.region }}</region>
+            <use_path_style_url>{{ .Values.clickhouse.gcsStorage.usePathStyle }}</use_path_style_url>
+            {{- if .Values.clickhouse.gcsStorage.sendMetadata }}
+            <send_metadata>true</send_metadata>
+            {{- end }}
+          </gcs>
+          <gcs_cache>
+            <type>cache</type>
+            <disk>gcs</disk>
+            <path>/var/lib/clickhouse/gcs_cache/</path>
+            <max_size>{{ .Values.clickhouse.gcsStorage.cache.maxSize }}</max_size>
+            {{- if .Values.clickhouse.gcsStorage.cache.cacheOnWriteOperations }}
+            <cache_on_write_operations>true</cache_on_write_operations>
+            {{- end }}
+          </gcs_cache>
+        </disks>
+        <policies>
+          {{- if eq .Values.clickhouse.gcsStorage.policy "gcs_only" }}
+          <gcs_only>
+            <volumes>
+              <main>
+                <disk>gcs_cache</disk>
+              </main>
+            </volumes>
+          </gcs_only>
+          {{- end }}
+          {{- if eq .Values.clickhouse.gcsStorage.policy "hot_local_cold_gcs" }}
+          <hot_local_cold_gcs>
+            <volumes>
+              <hot>
+                <disk>default</disk>
+                <max_data_part_size_bytes>{{ .Values.clickhouse.gcsStorage.hotMaxDataPartSizeBytes }}</max_data_part_size_bytes>
+              </hot>
+              <cold>
+                <disk>gcs</disk>
+              </cold>
+            </volumes>
+            <move_factor>{{ .Values.clickhouse.gcsStorage.moveFactor }}</move_factor>
+          </hot_local_cold_gcs>
+          {{- end }}
+        </policies>
+      </storage_configuration>
+    </clickhouse>
+  {{- end }}
+{{- end }}

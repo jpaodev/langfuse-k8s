@@ -1,0 +1,49 @@
+{{- if and .Values.clickhouse.deploy .Values.clickhouse.zookeeper.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "langfuse.fullname" . }}-zookeeper
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "langfuse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zookeeper
+spec:
+  type: ClusterIP
+  ports:
+  - name: client
+    port: 2181
+    targetPort: 2181
+    protocol: TCP
+  selector:
+    {{- include "langfuse.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: zookeeper
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "langfuse.fullname" . }}-zookeeper-headless
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "langfuse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zookeeper
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+  - name: client
+    port: 2181
+    targetPort: 2181
+    protocol: TCP
+  - name: follower
+    port: 2888
+    targetPort: 2888
+    protocol: TCP
+  - name: election
+    port: 3888
+    targetPort: 3888
+    protocol: TCP
+  selector:
+    {{- include "langfuse.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: zookeeper
+{{- end }}

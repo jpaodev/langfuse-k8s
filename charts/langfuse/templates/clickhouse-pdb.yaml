@@ -1,0 +1,22 @@
+{{- if and .Values.clickhouse.deploy (and .Values.clickhouse.podDisruptionBudget (hasKey .Values.clickhouse.podDisruptionBudget "enabled") .Values.clickhouse.podDisruptionBudget.enabled) -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "langfuse.fullname" . }}-clickhouse
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "langfuse.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+spec:
+  {{- if .Values.clickhouse.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.clickhouse.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if .Values.clickhouse.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.clickhouse.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "langfuse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: clickhouse
+      shard: "0"
+{{- end }}
